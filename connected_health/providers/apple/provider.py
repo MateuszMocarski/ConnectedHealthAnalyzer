@@ -26,7 +26,13 @@ class AppleHealthProvider:
     provider_id = "apple_health"
     _DISPLAY_LABEL = "Apple Health"
 
-    def load(self, path: Path, *, config: object) -> LoadedHealthData:
+    def load(
+        self,
+        path: Path,
+        *,
+        config: object,
+        report_timezone: str | None = None,
+    ) -> LoadedHealthData:
         if not isinstance(config, AppleProviderConfig):
             raise TypeError("AppleHealthProvider requires AppleProviderConfig.")
 
@@ -35,7 +41,10 @@ class AppleHealthProvider:
             with AppleHealthImporter(path).open_export() as xml_stream:
                 archive_open_seconds = perf_counter() - archive_open_started
                 parse_started = perf_counter()
-                data = AppleHealthParser(xml_stream, config=config).parse()
+                parser_arguments = {"config": config}
+                if report_timezone is not None:
+                    parser_arguments["report_timezone"] = report_timezone
+                data = AppleHealthParser(xml_stream, **parser_arguments).parse()
                 parse_seconds = perf_counter() - parse_started
         except AppleHealthError as exc:
             raise HealthDataProviderError(self._error_category(exc)) from exc

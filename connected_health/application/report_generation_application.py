@@ -59,7 +59,11 @@ class ReportGenerationApplication:
     def generate_reports(self, options, *, effective_config) -> ReportGenerationResult:
         provider_config = getattr(effective_config, "provider", effective_config)
         analysis_config = getattr(effective_config, "analysis", effective_config)
-        loaded = self.provider.load(options.archive_path, config=provider_config)
+        load_arguments = {"config": provider_config}
+        report_timezone = getattr(options, "report_timezone", None)
+        if report_timezone is not None:
+            load_arguments["report_timezone"] = report_timezone
+        loaded = self.provider.load(options.archive_path, **load_arguments)
         render_started = perf_counter()
         analyzer = self._analyzer_factory(loaded.data, analysis_config)
         text_renderer = self._text_renderer_factory(

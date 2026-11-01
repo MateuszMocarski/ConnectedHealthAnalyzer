@@ -21,10 +21,12 @@ from connected_health.providers.apple.parser import AppleHealthParser
 def _parse_xml(
     xml: str,
     config: AppConfig | None = None,
+    report_timezone: str | None = None,
 ):
     return AppleHealthParser(
         BytesIO(xml.encode("utf-8")),
         config=config,
+        report_timezone=report_timezone,
     ).parse()
 
 
@@ -904,3 +906,182 @@ def test_parser_rejects_non_finite_numeric_values(
             xml,
             config=config,
         )
+
+
+def test_daily_metrics_use_report_timezone_for_apple_start_dates() -> None:
+    config = AppConfig()
+    data = _parse_xml(
+        _wrap_xml(
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryProtein",
+                source_name=config.source.apple_health_app_source,
+                value="160",
+                start_date="2026-10-07 20:03:00 +0100",
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryProtein",
+                source_name=config.source.apple_health_app_source,
+                value="166",
+                start_date="2026-10-07 23:11:00 +0100",
+            ),
+        ),
+        config=config,
+        report_timezone="Europe/Warsaw",
+    )
+
+    assert [
+        (metric.date.isoformat(), metric.nutrition.protein_g) for metric in data.daily_metrics
+    ] == [
+        ("2026-10-07", 160.0),
+        ("2026-10-08", 166.0),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("records", "expected"),
+    [
+        (
+            [
+                ("2026-10-14 21:30:00 +0100", "144"),
+                ("2026-10-14 23:37:00 +0100", "164"),
+            ],
+            [("2026-10-14", 144.0), ("2026-10-15", 164.0)],
+        ),
+        (
+            [
+                ("2026-10-16 22:22:00 +0100", "173"),
+                ("2026-10-16 23:18:00 +0100", "168"),
+                ("2026-10-17 23:20:00 +0100", "163"),
+            ],
+            [
+                ("2026-10-16", 173.0),
+                ("2026-10-17", 168.0),
+                ("2026-10-18", 163.0),
+            ],
+        ),
+        (
+            [("2026-10-28 00:01:00 +0100", "166")],
+            [("2026-10-28", 166.0)],
+        ),
+    ],
+)
+def test_daily_metrics_apply_warsaw_dst_rules(
+    records: list[tuple[str, str]],
+    expected: list[tuple[str, float]],
+) -> None:
+    config = AppConfig()
+    data = _parse_xml(
+        _wrap_xml(
+            *(
+                _record(
+                    record_type="HKQuantityTypeIdentifierDietaryProtein",
+                    source_name=config.source.apple_health_app_source,
+                    value=value,
+                    start_date=start_date,
+                )
+                for start_date, value in records
+            )
+        ),
+        config=config,
+        report_timezone="Europe/Warsaw",
+    )
+
+    assert [
+        (metric.date.isoformat(), metric.nutrition.protein_g) for metric in data.daily_metrics
+    ] == expected
+
+
+def test_daily_metrics_preserve_offset_based_bucketing_without_report_timezone() -> None:
+    config = AppConfig()
+    data = _parse_xml(
+        _wrap_xml(
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryProtein",
+                source_name=config.source.apple_health_app_source,
+                value="166",
+                start_date="2026-10-07 23:11:00 +0100",
+            )
+        ),
+        config=config,
+    )
+
+    assert [metric.date.isoformat() for metric in data.daily_metrics] == ["2026-10-07"]
+
+
+def test_report_timezone_buckets_every_daily_metric_type_at_the_shared_boundary() -> None:
+    config = AppConfig()
+    timestamp = "2026-10-07 23:11:00 +0100"
+    health_source = config.source.apple_health_app_source
+    watch_source = config.source.apple_watch_source
+    data = _parse_xml(
+        _wrap_xml(
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryEnergyConsumed",
+                source_name=health_source,
+                value="2000",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryProtein",
+                source_name=health_source,
+                value="166",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryCarbohydrates",
+                source_name=health_source,
+                value="250",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierDietaryFatTotal",
+                source_name=health_source,
+                value="75",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierBodyMass",
+                source_name=health_source,
+                value="80",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierStepCount",
+                source_name=watch_source,
+                value="1000",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierDistanceWalkingRunning",
+                source_name=watch_source,
+                value="2.5",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierActiveEnergyBurned",
+                source_name=watch_source,
+                value="300",
+                start_date=timestamp,
+            ),
+            _record(
+                record_type="HKQuantityTypeIdentifierBasalEnergyBurned",
+                source_name=watch_source,
+                value="1800",
+                start_date=timestamp,
+            ),
+        ),
+        config=config,
+        report_timezone="Europe/Warsaw",
+    )
+
+    [metrics] = data.daily_metrics
+    assert metrics.date.isoformat() == "2026-10-08"
+    assert metrics.weight.value == 80.0
+    assert metrics.steps == 1000
+    assert metrics.distance_km == 2.5
+    assert metrics.active_energy == 300.0
+    assert metrics.basal_energy == 1800.0
+    assert metrics.nutrition.calories_kcal == 2000.0
+    assert metrics.nutrition.protein_g == 166.0
+    assert metrics.nutrition.carbohydrates_g == 250.0
+    assert metrics.nutrition.fat_g == 75.0

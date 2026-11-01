@@ -6382,6 +6382,11 @@
                 appleHealthAppSource.value,
             );
 
+            formData.append(
+                "report_timezone",
+                Intl.DateTimeFormat().resolvedOptions().timeZone,
+            );
+
             const saveConfigName =
                 saveConfigAs.value.trim();
 
