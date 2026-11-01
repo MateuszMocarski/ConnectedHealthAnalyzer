@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from math import isfinite
 from typing import BinaryIO
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from connected_health.enums import SleepStage, WorkoutType
 from connected_health.models import (
@@ -30,9 +31,20 @@ from connected_health.providers.apple.mappings import APPLE_WORKOUT_TYPES
 
 
 class AppleHealthParser:
-    def __init__(self, xml_stream: BinaryIO, config: AppleProviderConfig | None = None) -> None:
+    def __init__(
+        self,
+        xml_stream: BinaryIO,
+        config: AppleProviderConfig | None = None,
+        report_timezone: str | None = None,
+    ) -> None:
         self.xml_stream = xml_stream
         self.config = config or AppleProviderConfig()
+        try:
+            self.report_timezone = (
+                ZoneInfo(report_timezone) if report_timezone is not None else None
+            )
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise HealthDataParseError("Invalid report timezone.") from exc
 
     def parse(self) -> HealthData:
         workouts: list[Workout] = []
@@ -182,7 +194,11 @@ class AppleHealthParser:
             )
         )
 
-        day = recorded_at.date()
+        day = (
+            recorded_at.astimezone(self.report_timezone).date()
+            if self.report_timezone is not None
+            else recorded_at.date()
+        )
 
         metrics = daily_metrics.setdefault(
             day,

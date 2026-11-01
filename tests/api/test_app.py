@@ -1672,6 +1672,90 @@ def test_report_generation_forwards_source_overrides(
     }
 
 
+def test_report_generation_forwards_report_timezone_to_parsing_boundary(
+    monkeypatch,
+) -> None:
+    def fake_generate_reports(self, options):
+        assert options.report_timezone == "Europe/Warsaw"
+        return _generation_result()
+
+    monkeypatch.setattr(
+        AppleHealthApplication,
+        "generate_reports",
+        fake_generate_reports,
+    )
+
+    response = client.post(
+        "/reports/generate",
+        files={"archive": ("export.zip", b"fake-archive", "application/zip")},
+        data={
+            "periods": "2026-08",
+            "report_timezone": "Europe/Warsaw",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_report_generation_passes_report_timezone_to_apple_parser(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from connected_health.providers.apple.parser import AppleHealthParser as RealParser
+
+    captured = {}
+
+    class CapturingParser:
+        def __init__(self, xml_stream, config, report_timezone=None) -> None:
+            captured["report_timezone"] = report_timezone
+            self._parser = RealParser(
+                xml_stream,
+                config=config,
+                report_timezone=report_timezone,
+            )
+
+        def parse(self):
+            return self._parser.parse()
+
+    monkeypatch.setattr(
+        "connected_health.providers.apple.provider.AppleHealthParser",
+        CapturingParser,
+    )
+
+    archive_path = _create_export_archive(tmp_path)
+    response = client.post(
+        "/reports/generate",
+        files={
+            "archive": (
+                "export.zip",
+                archive_path.read_bytes(),
+                "application/zip",
+            )
+        },
+        data={
+            "periods": "2026-08",
+            "report_timezone": "Europe/Warsaw",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["report_timezone"] == "Europe/Warsaw"
+
+
+def test_report_generation_rejects_invalid_report_timezone() -> None:
+    response = client.post(
+        "/reports/generate",
+        files={"archive": ("export.zip", b"fake-archive", "application/zip")},
+        data={
+            "periods": "2026-08",
+            "report_timezone": "Not/A_Timezone",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid report timezone."}
+
+
 # =====================================================================
 # Verifies that blank source fields are treated as absent overrides so
 # the configured defaults remain effective.

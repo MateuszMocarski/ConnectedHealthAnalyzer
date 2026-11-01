@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import (
     Cookie,
@@ -230,6 +231,21 @@ def _normalize_optional_source(
     normalized = value.strip()
 
     return normalized or None
+
+
+def _validate_report_timezone(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    try:
+        ZoneInfo(value)
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid report timezone.",
+        ) from exc
+
+    return value
 
 
 def discover_config_profiles_for_session(
@@ -1131,6 +1147,7 @@ def generate_report(
     config: UploadFile | None = File(default=None),
     apple_watch_source: str | None = Form(default=None),
     apple_health_app_source: str | None = Form(default=None),
+    report_timezone: str | None = Form(default=None),
     ahm_session: str | None = Cookie(default=None),
     save_config_as: str | None = Form(default=None),
     drive_file_id: str | None = Form(default=None),
@@ -1144,6 +1161,7 @@ def generate_report(
 
     try:
         parsed_periods = _parse_periods(periods)
+        validated_report_timezone = _validate_report_timezone(report_timezone)
 
         request_started = perf_counter()
 
@@ -1277,6 +1295,7 @@ def generate_report(
                         apple_health_app_source,
                     )
                 ),
+                report_timezone=validated_report_timezone,
                 outputs=outputs,
             )
 

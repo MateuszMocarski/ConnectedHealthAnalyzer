@@ -29,7 +29,13 @@ class LoadedHealthData:
 class HealthDataProvider(Protocol):
     provider_id: str
 
-    def load(self, path: Path, *, config: object) -> LoadedHealthData: ...
+    def load(
+        self,
+        path: Path,
+        *,
+        config: object,
+        report_timezone: str | None = None,
+    ) -> LoadedHealthData: ...
 
 
 class HealthDataProviderError(Exception):

@@ -51,6 +51,8 @@ def test_frontend_keeps_apple_contract_inside_selected_workflow() -> None:
     assert "Apple Health app source" in index
     assert 'name="apple_watch_source"' in index
     assert 'name="apple_health_app_source"' in index
+    assert '"report_timezone"' in index
+    assert "Intl.DateTimeFormat().resolvedOptions().timeZone" in index
     assert "Garmin" not in index
 
     form_data_function = re.search(

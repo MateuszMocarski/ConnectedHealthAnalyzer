@@ -15,3 +15,4 @@ class MultiMonthRunOptions:
     apple_watch_source: str | None = None
     apple_health_app_source: str | None = None
     outputs: ReportOutputs = ReportOutputs()
+    report_timezone: str | None = None
